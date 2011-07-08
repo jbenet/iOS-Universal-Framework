@@ -9,7 +9,7 @@
 	<key>Concrete</key>
 	<true/>
 	<key>Description</key>
-	<string>This template builds a static iOS framework. Building "Universal Framework" will produce "&lt;configuration&gt;-universal/&lt;your framework&gt;" in your build folder.</string>
+	<string>This template builds a static iOS framework.</string>
 	<key>SortOrder</key>
 	<integer>5</integer>
 	<key>Ancestors</key>
@@ -21,7 +21,7 @@
 	<array>
 		<dict>
 			<key>ProductType</key>
-			<string>com.apple.product-type.framework</string>
+			<string>com.apple.product-type.bundle</string>
 			<key>SharedSettings</key>
 			<dict>
 				<key>WRAPPER_EXTENSION</key>
@@ -34,6 +34,18 @@
 				<string>1</string>
 				<key>SKIP_INSTALL</key>
 				<string>YES</string>
+				<key>GCC_PRECOMPILE_PREFIX_HEADER</key>
+				<string>NO</string>
+				<key>GCC_PREFIX_HEADER</key>
+				<string></string>
+				<key>DEAD_CODE_STRIPPING</key>
+				<string>NO</string>
+				<key>MACH_O_TYPE</key>
+				<string>mh_object</string>
+				<key>LINK_WITH_STANDARD_LIBRARIES</key>
+				<string>NO</string>
+				<key>RELEASE_TARBALL_FILE</key>
+				<string>release/$(TARGET_NAME).tar.gz</string>
 			</dict>
 			<key>BuildPhases</key>
 			<array>
@@ -43,11 +55,98 @@
 				</dict>
 				<dict>
 					<key>Class</key>
-					<string>Frameworks</string>
+					<string>Headers</string>
 				</dict>
 				<dict>
 					<key>Class</key>
-					<string>Headers</string>
+					<string>ShellScript</string>
+					<key>ShellPath</key>
+					<string>/bin/sh</string>
+					<key>ShellScript</key>
+					<string>if [ "${ACTION}" = "build" ]
+then
+
+# Product name should be ${TARGET_NAME}.framework anyway...
+FWK_NAME="${WRAPPER_NAME}"
+FWK_LIB="${FWK_NAME}/${TARGET_NAME}"
+
+# Set the target folders and the final framework product.
+FWK_PATH="${SYMROOT}/${CONFIGURATION}-framework"
+DEV_PATH="${SYMROOT}/${CONFIGURATION}-iphoneos"
+SIM_PATH="${SYMROOT}/${CONFIGURATION}-iphonesimulator"
+FWK_ROOT="${FWK_PATH}/${FWK_NAME}"
+
+echo "framework: building ${FWK_NAME}"
+
+echo "framework: setting up framework directory structure"
+
+mkdir -p "${FWK_ROOT}"
+rm -rf "${FWK_ROOT}/"*
+
+if [ $? -ne 0 ];then
+  echo "error: failed to delete existing framework. check permissions?"
+  exit
+fi
+
+# Build the canonical Framework bundle directory structure
+mkdir -p "${FWK_ROOT}/Versions"
+mkdir -p "${FWK_ROOT}/Versions/${FRAMEWORK_VERSION}"
+mkdir -p "${FWK_ROOT}/Versions/${FRAMEWORK_VERSION}/Resources"
+mkdir -p "${FWK_ROOT}/Versions/${FRAMEWORK_VERSION}/Headers"
+
+ln -s "${FRAMEWORK_VERSION}" "${FWK_ROOT}/Versions/Current"
+ln -s "Versions/Current/Headers" "${FWK_ROOT}/Headers"
+ln -s "Versions/Current/Resources" "${FWK_ROOT}/Resources"
+ln -s "Versions/Current/${TARGET_NAME}" "${FWK_ROOT}/${TARGET_NAME}"
+
+
+if [ ! -d "${DEV_PATH}/${FWK_NAME}/Headers" ]
+then
+  echo "error: Framework target \"${TARGET_NAME}\" did not copy any headers." \
+   "Make sure the desired headers are on the 'Copy Headers' Build Phase." \
+   "Make sure you built the Device target (from which headers are copied)."
+  exit 1
+fi
+
+# Copy the header files to the final product folder.
+echo "framework: copying headers from ${DEV_PATH}/${FWK_NAME}/Headers"
+ditto "${DEV_PATH}/${FWK_NAME}/Headers" "${FWK_ROOT}/Headers"
+
+# Copy the header files to the final product folder.
+echo "framework: copying Info.plist file"
+cp "${DEV_PATH}/${FWK_NAME}/Info.plist" "${FWK_ROOT}/Resources/Info.plist"
+
+# Use the Lipo Tool to merge both binary files (i386 + armv6/armv7) into one Universal final product.
+echo "framework: creating universal lib ${FWK_PATH}/${FWK_LIB}"
+lipo -create "${DEV_PATH}/${FWK_LIB}" "${SIM_PATH}/${FWK_LIB}" \
+     -output "${FWK_ROOT}/Versions/Current/${TARGET_NAME}"
+
+fi</string>
+				</dict>
+				<dict>
+					<key>Class</key>
+					<string>ShellScript</string>
+					<key>ShellPath</key>
+					<string>/bin/sh</string>
+					<key>ShellScript</key>
+					<string>if [ "${CONFIGURATION}" = "Release" ]
+then
+
+# Product name should be ${TARGET_NAME}.framework anyway...
+FWK_NAME="${WRAPPER_NAME}"
+FWK_PATH="${SYMROOT}/${CONFIGURATION}-framework"
+FWK_TARBALL="${RELEASE_TARBALL_FILE}"
+
+
+# Package up
+echo "framework: packaging release tarball"
+cd "${FWK_PATH}"
+tar -czf "${TARGET_NAME}.tar.gz" "${FWK_NAME}"
+cd "${PROJECT_DIR}"
+cp "${FWK_PATH}/${TARGET_NAME}.tar.gz" "${RELEASE_TARBALL_FILE}"
+
+
+fi</string>
 				</dict>
 				<dict>
 					<key>Class</key>
@@ -55,94 +154,7 @@
 				</dict>
 			</array>
 			<key>Frameworks</key>
-			<array>
-				<string>Foundation</string>
-			</array>
-            <key>ProductType</key>
-            <string>com.apple.product-type.framework.static</string>
-		</dict>
-		<dict>
-			<key>Name</key>
-			<string>Universal_Framework</string>
-			<key>TargetType</key>
-			<string>Aggregate</string>
-			<key>SharedSettings</key>
-			<dict>
-				<key>PRODUCT_NAME</key>
-				<string>UniversalFramework</string>
-			</dict>
-			<key>BuildPhases</key>
-			<array>
-				<dict>
-					<key>Class</key>
-					<string>ShellScript</string>
-					<key>ShellPath</key>
-					<string>/bin/sh</string>
-					<key>ShellScript</key>
-					<string>set -e
-set -u
-
-# Assume the target name is the same as the project name
-UFW_TARGET=${PROJECT}
-
-if [ -z ${SDK_NAME} ]
-then
-    # Use the latest iphoneos SDK available
-    UFW_GREP_RESULT=$(xcodebuild -showsdks | grep -o "iphoneos.*$")
-    while read -r line
-    do
-        UFW_SDK_VERSION="${line}"
-    done &lt;&lt;&lt; "${UFW_GREP_RESULT}"
-else
-    # Use the SDK specified by XCode
-    UFW_SDK_VERSION="${SDK_NAME}"
-fi
-
-UFW_SDK_VERSION=$(echo "${UFW_SDK_VERSION}" | grep -o "[0-9].*$")
-UFW_FMWK_DIRNAME="${UFW_TARGET}.framework"
-UFW_EMBEDDED_DIRNAME="${UFW_TARGET}.embeddedframework"
-UFW_EXE_PATH="${UFW_FMWK_DIRNAME}/Versions/Current/${UFW_TARGET}"
-UFW_IPHONE_DIR="${BUILD_DIR}/${CONFIGURATION}-iphoneos"
-UFW_SIMULATOR_DIR="${BUILD_DIR}/${CONFIGURATION}-iphonesimulator"
-UFW_UNIVERSAL_DIR="${BUILD_DIR}/${CONFIGURATION}-universal"
-
-
-# Build Framework
-
-rm -rf "${UFW_UNIVERSAL_DIR}"
-
-xcodebuild -project "${PROJECT_FILE_PATH}" -target "${UFW_TARGET}" -configuration ${CONFIGURATION} -sdk iphoneos${UFW_SDK_VERSION} BUILD_DIR=${BUILD_DIR} CONFIGURATION_TEMP_DIR=${CONFIGURATION_TEMP_DIR} clean build
-xcodebuild -project "${PROJECT_FILE_PATH}" -target "${UFW_TARGET}" -configuration ${CONFIGURATION} -sdk iphonesimulator${UFW_SDK_VERSION} BUILD_DIR=${BUILD_DIR} CONFIGURATION_TEMP_DIR=${CONFIGURATION_TEMP_DIR} clean build
-
-if [ ! -f "${UFW_IPHONE_DIR}/${UFW_EXE_PATH}" ]
-then
-    echo "Framework target \"${UFW_TARGET}\" had no source files to build from. Make sure your source files have the correct target membership"
-    exit 1
-fi
-
-mkdir -p "${UFW_UNIVERSAL_DIR}"
-cp -a "${UFW_IPHONE_DIR}/${UFW_FMWK_DIRNAME}" "${UFW_UNIVERSAL_DIR}/${UFW_FMWK_DIRNAME}"
-lipo -create -output "${UFW_UNIVERSAL_DIR}/${UFW_EXE_PATH}" "${UFW_IPHONE_DIR}/${UFW_EXE_PATH}" "${UFW_SIMULATOR_DIR}/${UFW_EXE_PATH}"
-
-
-# Build Embedded Framework
-
-mkdir -p "${UFW_UNIVERSAL_DIR}/${UFW_EMBEDDED_DIRNAME}/Resources"
-cp -a "${UFW_UNIVERSAL_DIR}/${UFW_FMWK_DIRNAME}" "${UFW_UNIVERSAL_DIR}/${UFW_EMBEDDED_DIRNAME}/"
-
-cd "${UFW_UNIVERSAL_DIR}/${UFW_FMWK_DIRNAME}/Resources"
-UFW_RESOURCE_LIST=$(ls)
-cd "${UFW_UNIVERSAL_DIR}/${UFW_EMBEDDED_DIRNAME}/Resources"
-while read -r filename
-do
-    if [ "${filename}" != "Info.plist" ]
-    then
-        ln -s "../${UFW_FMWK_DIRNAME}/Resources/${filename}"
-    fi
-done &lt;&lt;&lt; "${UFW_RESOURCE_LIST}"
-</string>
-                </dict>
-			</array>
+			<array></array>
 		</dict>
 	</array>
 	<key>Options</key>
@@ -181,7 +193,6 @@ done &lt;&lt;&lt; "${UFW_RESOURCE_LIST}"
 	</array>
 	<key>Nodes</key>
 	<array>
-		<string>___PACKAGENAME___-Prefix.pch:objC:importFoundation</string>
 		<string>___PACKAGENAME___-Info.plist:iosStaticFramework</string>
 		<string>___PACKAGENAME___-Info.plist:NSHumanReadableCopyright</string>
 	</array>
