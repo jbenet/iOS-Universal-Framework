@@ -1,0 +1,251 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Kind</key>
+	<string>Xcode.Xcode3.ProjectTemplateUnitKind</string>
+	<key>Identifier</key>
+	<string>org.stenerud.iosMacStaticFramework</string>
+	<key>Concrete</key>
+	<true/>
+	<key>Description</key>
+	<string>This template builds a static iOS and Mac framework.</string>
+	<key>SortOrder</key>
+	<integer>5</integer>
+	<key>Ancestors</key>
+	<array>
+		<string>com.apple.dt.unit.bundleBase</string>
+		<string>com.apple.dt.unit.iPhoneBase</string>
+	</array>
+	<key>Targets</key>
+	<array>
+		<dict>
+			<key>ProductType</key>
+			<string>com.apple.product-type.bundle</string>
+			<key>SharedSettings</key>
+			<dict>
+				<key>ARCHS</key>
+				<array>
+					<string>$(ARCHS_STANDARD_32_BIT)</string>
+  				<string>$(ARCHS_STANDARD_64_BIT)</string>
+  				<string>x86_64</string>
+				</array>
+				<key>WRAPPER_EXTENSION</key>
+				<string>framework</string>
+				<key>FRAMEWORK_VERSION</key>
+				<string>A</string>
+				<key>DYLIB_COMPATIBILITY_VERSION</key>
+				<string>1</string>
+				<key>DYLIB_CURRENT_VERSION</key>
+				<string>1</string>
+				<key>SKIP_INSTALL</key>
+				<string>YES</string>
+				<key>GCC_PRECOMPILE_PREFIX_HEADER</key>
+				<string>NO</string>
+				<key>GCC_VERSION</key>
+				<string>4.2</string>
+				<key>IPHONEOS_DEPLOYMENT_TARGET</key>
+				<string>3.2</string>
+				<key>DEAD_CODE_STRIPPING</key>
+				<string>NO</string>
+				<key>MACH_O_TYPE</key>
+				<string>mh_object</string>
+				<key>LINK_WITH_STANDARD_LIBRARIES</key>
+				<string>NO</string>
+				<key>OTHER_LDFLAGS</key>
+				<array>
+					<string>-ObjC</string>
+					<string>-all_load</string>
+				</array>
+				<key>RELEASE_TARBALL_FILE</key>
+				<string>release/$(TARGET_NAME).tar.gz</string>
+				<key>INFOPLIST_EXPAND_BUILD_SETTINGS</key>
+				<string>NO</string>
+				<key>INFOPLIST_OUTPUT_FORMAT</key>
+				<string>xml</string>
+				<key>INFOPLIST_PREPROCESS</key>
+				<string>YES</string>
+				<key>VALID_ARCHS</key>
+				<string>armv6 armv7 x86_64 i386</string>
+			</dict>
+			<key>BuildPhases</key>
+			<array>
+				<dict>
+					<key>Class</key>
+					<string>Sources</string>
+				</dict>
+				<dict>
+					<key>Class</key>
+					<string>Headers</string>
+				</dict>
+				<dict>
+					<key>Class</key>
+					<string>Frameworks</string>
+				</dict>
+				<dict>
+					<key>Class</key>
+					<string>ShellScript</string>
+					<key>ShellPath</key>
+					<string>/bin/sh</string>
+					<key>ShellScript</key>
+					<string>if [ "${ACTION}" = "build" ]
+then
+
+# Product name should be ${TARGET_NAME}.framework anyway...
+FWK_NAME="${WRAPPER_NAME}"
+FWK_LIB="${FWK_NAME}/${TARGET_NAME}"
+
+# Set the target folders and the final framework product.
+FWK_PATH="${SYMROOT}/${CONFIGURATION}-framework"
+DEV_PATH="${SYMROOT}/${CONFIGURATION}-iphoneos"
+SIM_PATH="${SYMROOT}/${CONFIGURATION}-iphonesimulator"
+FWK_ROOT="${FWK_PATH}/${FWK_NAME}"
+
+echo "framework: building ${FWK_NAME}"
+
+echo "framework: setting up framework directory structure"
+
+mkdir -p "${FWK_ROOT}"
+rm -rf "${FWK_ROOT}/"*
+
+if [ $? -ne 0 ];then
+  echo "error: failed to delete existing framework. check permissions?"
+  exit
+fi
+
+# Build the canonical Framework bundle directory structure
+mkdir -p "${FWK_ROOT}/Versions"
+mkdir -p "${FWK_ROOT}/Versions/${FRAMEWORK_VERSION}"
+mkdir -p "${FWK_ROOT}/Versions/${FRAMEWORK_VERSION}/Resources"
+mkdir -p "${FWK_ROOT}/Versions/${FRAMEWORK_VERSION}/Headers"
+
+ln -s "${FRAMEWORK_VERSION}" "${FWK_ROOT}/Versions/Current"
+ln -s "Versions/Current/Headers" "${FWK_ROOT}/Headers"
+ln -s "Versions/Current/Resources" "${FWK_ROOT}/Resources"
+ln -s "Versions/Current/${TARGET_NAME}" "${FWK_ROOT}/${TARGET_NAME}"
+
+
+if [ ! -d "${DEV_PATH}/${FWK_NAME}/Headers" ]
+then
+  echo "error: Framework target \"${TARGET_NAME}\" did not copy any headers." \
+   "Make sure the desired headers are on the 'Copy Headers' Build Phase." \
+   "Make sure you built the Device target (from which headers are copied)."
+  exit 1
+fi
+
+# Copy the header files to the final product folder.
+echo "framework: copying headers from ${DEV_PATH}/${FWK_NAME}/Headers"
+ditto "${DEV_PATH}/${FWK_NAME}/Headers" "${FWK_ROOT}/Headers"
+
+# Copy the header files to the final product folder.
+echo "framework: copying Info.plist file"
+cp "${DEV_PATH}/${FWK_NAME}/Info.plist" "${FWK_ROOT}/Resources/Info.plist"
+
+# Use the Lipo Tool to merge both binary files (i386 + armv6/armv7) into one Universal final product.
+echo "framework: creating universal lib ${FWK_PATH}/${FWK_LIB}"
+lipo -create "${DEV_PATH}/${FWK_LIB}" "${SIM_PATH}/${FWK_LIB}" \
+     -output "${FWK_ROOT}/Versions/Current/${TARGET_NAME}"
+
+fi</string>
+				</dict>
+				<dict>
+					<key>Class</key>
+					<string>ShellScript</string>
+					<key>ShellPath</key>
+					<string>/bin/sh</string>
+					<key>ShellScript</key>
+					<string>if [ "${CONFIGURATION}" = "Release" ]
+then
+
+# Product name should be ${TARGET_NAME}.framework anyway...
+FWK_NAME="${WRAPPER_NAME}"
+FWK_PATH="${SYMROOT}/${CONFIGURATION}-framework"
+FWK_TARBALL="${RELEASE_TARBALL_FILE}"
+
+
+# Package up
+TARBALL_PATH=`dirname "${RELEASE_TARBALL_FILE}"`
+TARBALL_FILENAME=`basename "${RELEASE_TARBALL_FILE}"`
+echo "framework: packaging release tarball"
+mkdir -p "${TARBALL_PATH}"
+cp -r "${FWK_PATH}/${FWK_NAME}" "${TARBALL_PATH}/."
+cd "${TARBALL_PATH}"
+tar -czf "${TARBALL_FILENAME}" "${FWK_NAME}"
+
+fi</string>
+				</dict>
+				<dict>
+					<key>Class</key>
+					<string>Resources</string>
+				</dict>
+			</array>
+			<key>Frameworks</key>
+			<array></array>
+		</dict>
+	</array>
+	<key>Options</key>
+	<array>
+		<dict>
+			<key>Identifier</key>
+			<string>includeUnitTests</string>
+			<key>Name</key>
+			<string>Include Unit Tests</string>
+			<key>Description</key>
+			<string>Indicates whether a unit test bundle should be created.</string>
+			<key>Type</key>
+			<string>checkbox</string>
+			<key>SortOrder</key>
+			<integer>1</integer>
+			<key>Default</key>
+			<string>true</string>
+			<key>Units</key>
+			<dict>
+				<key>true</key>
+				<array>
+					<dict>
+						<key>Components</key>
+						<array>
+							<dict>
+								<key>Identifier</key>
+								<string>org.stenerud.iosStaticFrameworkUnitTestBundle</string>
+								<key>Name</key>
+								<string>___PACKAGENAME___Tests</string>
+							</dict>
+						</array>
+					</dict>
+				</array>
+			</dict>
+		</dict>
+	</array>
+	<key>Nodes</key>
+	<array>
+		<string>___PACKAGENAME___-Info.plist:iosMacStaticFramework</string>
+		<string>___PACKAGENAME___-Info.plist:NSHumanReadableCopyright</string>
+	</array>
+	<key>Definitions</key>
+	<dict>
+		<key>___PACKAGENAME___-Info.plist:iosMacStaticFramework</key>
+		<string>&lt;key&gt;CFBundleDevelopmentRegion&lt;/key&gt;
+&lt;string&gt;English&lt;/string&gt;
+&lt;key&gt;CFBundleExecutable&lt;/key&gt;
+&lt;string&gt;${EXECUTABLE_NAME}&lt;/string&gt;
+&lt;key&gt;CFBundleName&lt;/key&gt;
+&lt;string&gt;${PRODUCT_NAME}&lt;/string&gt;
+&lt;key&gt;CFBundleIconFile&lt;/key&gt;
+&lt;string&gt;&lt;/string&gt;
+&lt;key&gt;CFBundleInfoDictionaryVersion&lt;/key&gt;
+&lt;string&gt;6.0&lt;/string&gt;
+&lt;key&gt;CFBundlePackageType&lt;/key&gt;
+&lt;string&gt;FMWK&lt;/string&gt;
+&lt;key&gt;CFBundleSignature&lt;/key&gt;
+&lt;string&gt;????&lt;/string&gt;
+&lt;key&gt;CFBundleVersion&lt;/key&gt;
+&lt;string&gt;1&lt;/string&gt;
+&lt;key&gt;CFBundleShortVersionString&lt;/key&gt;
+&lt;string&gt;1.0&lt;/string&gt;
+&lt;key&gt;NSPrincipalClass&lt;/key&gt;
+&lt;string&gt;&lt;/string&gt;
+</string>
+	</dict>
+</dict>
+</plist>
