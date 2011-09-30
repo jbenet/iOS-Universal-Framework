@@ -51,6 +51,95 @@
 			<array>
 				<dict>
 					<key>Class</key>
+					<string>ShellScript</string>
+					<key>ShellPath</key>
+					<string>/bin/sh</string>
+					<key>ShowEnvVarsInLog</key>
+					<string>false</string>
+					<key>ShellScript</key>
+					<string>set -e
+
+set +u
+if [[ $UFW_MASTER_SCRIPT_RUNNING ]]
+then
+    # Nothing for the slave script to do
+    exit 0
+fi
+set -u
+
+if [[ "$SDK_NAME" =~ ([A-Za-z]+) ]]
+then
+    UFW_SDK_PLATFORM=${BASH_REMATCH[1]}
+else
+    echo "Could not find platform name from SDK_NAME: $SDK_NAME"
+    exit 1
+fi
+
+if [[ "$SDK_NAME" =~ ([0-9]+.*$) ]]
+then
+	UFW_SDK_VERSION=${BASH_REMATCH[1]}
+else
+    echo "Could not find sdk version  from SDK_NAME: $SDK_NAME"
+    exit 1
+fi
+
+if [[ "$UFW_SDK_PLATFORM" = "iphoneos" ]]
+then
+    UFW_OTHER_PLATFORM=iphonesimulator
+else
+    UFW_OTHER_PLATFORM=iphoneos
+fi
+
+if [[ "$BUILT_PRODUCTS_DIR" =~ (.*)$UFW_SDK_PLATFORM$ ]]
+then
+    UFW_OTHER_BUILT_PRODUCTS_DIR="${BASH_REMATCH[1]}${UFW_OTHER_PLATFORM}"
+else
+    echo "Could not find $UFW_SDK_PLATFORM in $BUILT_PRODUCTS_DIR"
+    exit 1
+fi
+
+ONLY_ACTIVE_PLATFORM=${ONLY_ACTIVE_PLATFORM:-$ONLY_ACTIVE_ARCH}
+
+# Short-circuit if all binaries are up to date
+
+if [[ -f "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_PATH}" ]] &amp;&amp; \
+   [[ -f "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.embeddedframework/${EXECUTABLE_PATH}" ]] &amp;&amp; \
+   [[ ! "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_PATH}" -nt "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.embeddedframework/${EXECUTABLE_PATH}" ]] &amp;&amp; \
+  ([[ "${ONLY_ACTIVE_PLATFORM}" == "YES" ]] || \
+    ([[ -f "${UFW_OTHER_BUILT_PRODUCTS_DIR}/${EXECUTABLE_PATH}" ]] &amp;&amp; \
+     [[ -f "${UFW_OTHER_BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.embeddedframework/${EXECUTABLE_PATH}" ]] &amp;&amp; \
+     [[ ! "${UFW_OTHER_BUILT_PRODUCTS_DIR}/${EXECUTABLE_PATH}" -nt "${UFW_OTHER_BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.embeddedframework/${EXECUTABLE_PATH}" ]]
+    )
+  )
+then
+    exit 0
+fi
+
+
+# Clean other platform if needed
+
+if [[ ! -f "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_PATH}" ]] &amp;&amp; [[ "${ONLY_ACTIVE_PLATFORM}" != "YES" ]]
+then
+	echo "Platform \"$UFW_SDK_PLATFORM\" was cleaned recently. Cleaning \"$UFW_OTHER_PLATFORM\" as well"
+	echo xcodebuild -project "${PROJECT_FILE_PATH}" -target "${TARGET_NAME}" -configuration "${CONFIGURATION}" -sdk ${UFW_OTHER_PLATFORM}${UFW_SDK_VERSION} BUILD_DIR="${BUILD_DIR}" CONFIGURATION_TEMP_DIR="${PROJECT_TEMP_DIR}/${CONFIGURATION}-${UFW_OTHER_PLATFORM}" clean
+	xcodebuild -project "${PROJECT_FILE_PATH}" -target "${TARGET_NAME}" -configuration "${CONFIGURATION}" -sdk ${UFW_OTHER_PLATFORM}${UFW_SDK_VERSION} BUILD_DIR="${BUILD_DIR}" CONFIGURATION_TEMP_DIR="${PROJECT_TEMP_DIR}/${CONFIGURATION}-${UFW_OTHER_PLATFORM}" clean
+fi
+
+
+# Make sure we are building from fresh binaries
+
+rm -rf "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_PATH}"
+rm -rf "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.embeddedframework"
+
+if [[ "${ONLY_ACTIVE_PLATFORM}" != "YES" ]]
+then
+    rm -rf "${UFW_OTHER_BUILT_PRODUCTS_DIR}/${EXECUTABLE_PATH}"
+    rm -rf "${UFW_OTHER_BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.embeddedframework"
+fi
+</string>
+                </dict>
+				<dict>
+					<key>Class</key>
 					<string>Sources</string>
 				</dict>
 				<dict>
@@ -59,102 +148,164 @@
 				</dict>
 				<dict>
 					<key>Class</key>
-					<string>ShellScript</string>
-					<key>ShellPath</key>
-					<string>/bin/sh</string>
-					<key>ShellScript</key>
-					<string>if [ "${ACTION}" = "build" ]
-then
-
-# Product name should be ${TARGET_NAME}.framework anyway...
-FWK_NAME="${WRAPPER_NAME}"
-FWK_LIB="${FWK_NAME}/${TARGET_NAME}"
-
-# Set the target folders and the final framework product.
-FWK_PATH="${SYMROOT}/${CONFIGURATION}-framework"
-DEV_PATH="${SYMROOT}/${CONFIGURATION}-iphoneos"
-SIM_PATH="${SYMROOT}/${CONFIGURATION}-iphonesimulator"
-FWK_ROOT="${FWK_PATH}/${FWK_NAME}"
-
-echo "framework: building ${FWK_NAME}"
-
-echo "framework: setting up framework directory structure"
-
-mkdir -p "${FWK_ROOT}"
-rm -rf "${FWK_ROOT}/"*
-
-if [ $? -ne 0 ];then
-  echo "error: failed to delete existing framework. check permissions?"
-  exit
-fi
-
-# Build the canonical Framework bundle directory structure
-mkdir -p "${FWK_ROOT}/Versions"
-mkdir -p "${FWK_ROOT}/Versions/${FRAMEWORK_VERSION}"
-mkdir -p "${FWK_ROOT}/Versions/${FRAMEWORK_VERSION}/Resources"
-mkdir -p "${FWK_ROOT}/Versions/${FRAMEWORK_VERSION}/Headers"
-
-ln -s "${FRAMEWORK_VERSION}" "${FWK_ROOT}/Versions/Current"
-ln -s "Versions/Current/Headers" "${FWK_ROOT}/Headers"
-ln -s "Versions/Current/Resources" "${FWK_ROOT}/Resources"
-ln -s "Versions/Current/${TARGET_NAME}" "${FWK_ROOT}/${TARGET_NAME}"
-
-
-if [ ! -d "${DEV_PATH}/${FWK_NAME}/Headers" ]
-then
-  echo "error: Framework target \"${TARGET_NAME}\" did not copy any headers." \
-   "Make sure the desired headers are on the 'Copy Headers' Build Phase." \
-   "Make sure you built the Device target (from which headers are copied)."
-  exit 1
-fi
-
-# Copy the header files to the final product folder.
-echo "framework: copying headers from ${DEV_PATH}/${FWK_NAME}/Headers"
-ditto "${DEV_PATH}/${FWK_NAME}/Headers" "${FWK_ROOT}/Headers"
-
-# Copy the header files to the final product folder.
-echo "framework: copying Info.plist file"
-cp "${DEV_PATH}/${FWK_NAME}/Info.plist" "${FWK_ROOT}/Resources/Info.plist"
-
-# Use the Lipo Tool to merge both binary files (i386 + armv6/armv7) into one Universal final product.
-echo "framework: creating universal lib ${FWK_PATH}/${FWK_LIB}"
-lipo -create "${DEV_PATH}/${FWK_LIB}" "${SIM_PATH}/${FWK_LIB}" \
-     -output "${FWK_ROOT}/Versions/Current/${TARGET_NAME}"
-
-fi</string>
-				</dict>
-				<dict>
-					<key>Class</key>
-					<string>ShellScript</string>
-					<key>ShellPath</key>
-					<string>/bin/sh</string>
-					<key>ShellScript</key>
-					<string>if [ "${CONFIGURATION}" = "Release" ]
-then
-
-# Product name should be ${TARGET_NAME}.framework anyway...
-FWK_NAME="${WRAPPER_NAME}"
-FWK_PATH="${SYMROOT}/${CONFIGURATION}-framework"
-FWK_TARBALL="${RELEASE_TARBALL_FILE}"
-
-
-# Package up
-echo "framework: packaging release tarball"
-cd "${FWK_PATH}"
-tar -czf "${TARGET_NAME}.tar.gz" "${FWK_NAME}"
-cd "${PROJECT_DIR}"
-cp "${FWK_PATH}/${TARGET_NAME}.tar.gz" "${RELEASE_TARBALL_FILE}"
-
-
-fi</string>
-				</dict>
-				<dict>
-					<key>Class</key>
 					<string>Resources</string>
+				</dict>
+				<dict>
+					<key>Class</key>
+					<string>ShellScript</string>
+					<key>ShellPath</key>
+					<string>/bin/sh</string>
+					<key>ShowEnvVarsInLog</key>
+					<string>false</string>
+					<key>ShellScript</key>
+					<string>set -e
+
+set +u
+if [[ $UFW_MASTER_SCRIPT_RUNNING ]]
+then
+    # Nothing for the slave script to do
+    exit 0
+fi
+set -u
+export UFW_MASTER_SCRIPT_RUNNING=1
+
+
+# Functions
+
+## List files in the specified directory, storing to the specified array.
+#
+# @param $1 The path to list
+# @param $2 The name of the array to fill
+#
+##
+list_files ()
+{
+    filelist=$(ls "$1")
+    while read line
+    do
+        eval "$2[\${#$2[*]}]=\"\$line\""
+    done &lt;&lt;&lt; "$filelist"
+}
+
+
+# Sanity check
+
+if [[ ! -f "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_PATH}" ]]
+then
+    echo "Framework target \"${TARGET_NAME}\" had no source files to build from. Make sure your source files have the correct target membership"
+    exit 1
+fi
+
+
+# Gather information
+
+if [[ "$SDK_NAME" =~ ([A-Za-z]+) ]]
+then
+    UFW_SDK_PLATFORM=${BASH_REMATCH[1]}
+else
+    echo "Could not find platform name from SDK_NAME: $SDK_NAME"
+    exit 1
+fi
+
+if [[ "$SDK_NAME" =~ ([0-9]+.*$) ]]
+then
+    UFW_SDK_VERSION=${BASH_REMATCH[1]}
+else
+    echo "Could not find sdk version from SDK_NAME: $SDK_NAME"
+    exit 1
+fi
+
+if [[ "$UFW_SDK_PLATFORM" = "iphoneos" ]]
+then
+    UFW_OTHER_PLATFORM=iphonesimulator
+else
+    UFW_OTHER_PLATFORM=iphoneos
+fi
+
+if [[ "$BUILT_PRODUCTS_DIR" =~ (.*)$UFW_SDK_PLATFORM$ ]]
+then
+    UFW_OTHER_BUILT_PRODUCTS_DIR="${BASH_REMATCH[1]}${UFW_OTHER_PLATFORM}"
+else
+    echo "Could not find $UFW_SDK_PLATFORM in $BUILT_PRODUCTS_DIR"
+    exit 1
+fi
+
+ONLY_ACTIVE_PLATFORM=${ONLY_ACTIVE_PLATFORM:-$ONLY_ACTIVE_ARCH}
+
+# Short-circuit if all binaries are up to date.
+# We already checked the other platform in the prerun script.
+
+if [[ -f "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_PATH}" ]] &amp;&amp; [[ -f "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.embeddedframework/${EXECUTABLE_PATH}" ]] &amp;&amp; [[ ! "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_PATH}" -nt "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.embeddedframework/${EXECUTABLE_PATH}" ]]
+then
+    exit 0
+fi
+
+if [ "${ONLY_ACTIVE_PLATFORM}" == "YES" ]
+then
+    echo "ONLY_ACTIVE_PLATFORM=${ONLY_ACTIVE_PLATFORM}: Skipping other platform build"
+else
+    # Make sure the other platform gets built
+    
+    echo "Build other platform"
+    
+    echo xcodebuild -project "${PROJECT_FILE_PATH}" -target "${TARGET_NAME}" -configuration "${CONFIGURATION}" -sdk ${UFW_OTHER_PLATFORM}${UFW_SDK_VERSION} BUILD_DIR="${BUILD_DIR}" CONFIGURATION_TEMP_DIR="${PROJECT_TEMP_DIR}/${CONFIGURATION}-${UFW_OTHER_PLATFORM}" $ACTION
+    xcodebuild -project "${PROJECT_FILE_PATH}" -target "${TARGET_NAME}" -configuration "${CONFIGURATION}" -sdk ${UFW_OTHER_PLATFORM}${UFW_SDK_VERSION} BUILD_DIR="${BUILD_DIR}" CONFIGURATION_TEMP_DIR="${PROJECT_TEMP_DIR}/${CONFIGURATION}-${UFW_OTHER_PLATFORM}" $ACTION
+    
+    
+    # Build the fat static library binary
+    
+    echo "Create universal static library"
+    
+    echo "$PLATFORM_DEVELOPER_BIN_DIR/libtool" -static "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_PATH}" "${UFW_OTHER_BUILT_PRODUCTS_DIR}/${EXECUTABLE_PATH}" -o "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_PATH}.temp"
+    "$PLATFORM_DEVELOPER_BIN_DIR/libtool" -static "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_PATH}" "${UFW_OTHER_BUILT_PRODUCTS_DIR}/${EXECUTABLE_PATH}" -o "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_PATH}.temp"
+    
+    echo mv "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_PATH}.temp" "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_PATH}"
+    mv "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_PATH}.temp" "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_PATH}"
+fi
+
+# Build embedded framework structure
+
+echo "Build Embedded Framework"
+
+echo rm -rf "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.embeddedframework"
+rm -rf "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.embeddedframework"
+echo mkdir -p "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.embeddedframework/Resources"
+mkdir -p "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.embeddedframework/Resources"
+echo cp -a "${BUILT_PRODUCTS_DIR}/${WRAPPER_NAME}" "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.embeddedframework/"
+cp -a "${BUILT_PRODUCTS_DIR}/${WRAPPER_NAME}" "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.embeddedframework/"
+
+declare -a UFW_FILE_LIST
+list_files "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}" UFW_FILE_LIST
+for filename in "${UFW_FILE_LIST[@]}"
+do
+    if [[ "${filename}" != "Info.plist" ]] &amp;&amp; [[ ! "${filename}" =~ .*\.lproj$ ]]
+    then
+        echo ln -sf "../${WRAPPER_NAME}/Resources/${filename}" "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.embeddedframework/Resources/${filename}"
+        ln -sf "../${WRAPPER_NAME}/Resources/${filename}" "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.embeddedframework/Resources/${filename}"
+    fi
+done
+
+
+if [ "${ONLY_ACTIVE_PLATFORM}" != "YES" ]
+then
+    # Replace other platform's framework with a copy of this one (so that both have the same universal binary)
+    
+    echo "Copy from $UFW_SDK_PLATFORM to $UFW_OTHER_PLATFORM"
+    
+    echo rm -rf "${BUILD_DIR}/${CONFIGURATION}-${UFW_OTHER_PLATFORM}"
+    rm -rf "${BUILD_DIR}/${CONFIGURATION}-${UFW_OTHER_PLATFORM}"
+    echo cp -a "${BUILD_DIR}/${CONFIGURATION}-${UFW_SDK_PLATFORM}" "${BUILD_DIR}/${CONFIGURATION}-${UFW_OTHER_PLATFORM}"
+    cp -a "${BUILD_DIR}/${CONFIGURATION}-${UFW_SDK_PLATFORM}" "${BUILD_DIR}/${CONFIGURATION}-${UFW_OTHER_PLATFORM}"
+fi
+</string>
 				</dict>
 			</array>
 			<key>Frameworks</key>
-			<array></array>
+			<array>
+				<string>Foundation</string>
+			</array>
+            <key>ProductType</key>
+            <string>com.apple.product-type.framework.static</string>
 		</dict>
 	</array>
 	<key>Options</key>
